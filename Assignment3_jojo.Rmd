@@ -106,15 +106,69 @@ Step 2: Analyse pitch variability in ASD in two new studies for which you have a
 - Also, let's standardize the data, so that they are compatible with our meta-analytic prior (Cohen's d is measured in SDs).
 - Is there any structure in the dataset that we should account for with random/varying effects? How would you implement that? Or, if you don't know how to do bayesian random/varying effects or don't want to bother, is there anything we would need to simplify in the dataset?
 
+### Loading more data :))
+```{r}
+d <- read_csv("Ass3_data.csv")
+d <- d %>% 
+  select(ID, Language, Pitch_IQR, Gender, Age, Diagnosis) %>% 
+  mutate(ID = as_factor(ID),
+         across(where(is.numeric), rethinking::normalize))
+```
+
 Step 3: Build a regression model predicting Pitch variability from Diagnosis.
 - how is the outcome distributed? (likelihood function). NB. given we are standardizing, and the meta-analysis is on that scale, gaussian is not a bad assumption, but check t-student as well. Lognormal would require us to convert the prior to that scale.
 - how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on? Start simple, with Diagnosis only. Add other predictors only if you have the time and energy!
 - use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it, test its predictions (prior predictive checks), its impact on the posteriors (prior posterior updates checks).
 - Evaluate model quality. Describe and plot the estimates. 
 
+```{r}
+ass_f <- bf(Pitch_IQR ~ 0 + Diagnosis + (0 + Diagnosis | ID) + (1 | Language|ID))
+
+get_prior(ass_f, family=gaussian, data=d)
+
+ass_priors <- c(
+  prior(normal(0, 0.5), class=b),
+  prior(lkj(1), class=cor), 
+  prior(normal(0.5, 0.25), class=sd),
+  prior(normal(0.5, 0.25), class=sigma)
+)
+
+ass_m0_prior <- brm(
+  ass_f,
+  d,
+  family=gaussian,
+  prior=ass_priors,
+  sample_prior = "only",
+  cores = 2,
+  chains = 2,
+  backend = "cmdstanr")
+
+pp_check(ass_m0_prior, nsamples=100)
+
+ass_m0 <- update(ass_m0_prior, sample_prior=T)
+pp_check(ass_m0, nsamples=100)
+
+summary(ass_m0)
+
+hypothesis(ass_m0, "abs(DiagnosisASD - DiagnosisTD) > 0")
+```
+
+
+
 Step 4: Now re-run the model with the meta-analytic prior
 - Evaluate model quality. Describe and plot the estimates. 
 - N.B. you need to assess the meta-analytic informed prior (prior pred checks, prior-posterior update checks) and if relevant you can always change it in motivated ways (e.g. too confident, doesn't let the model actually learn from the data, so increase sd)
+
+```{r}
+d %>% 
+  group_by(ID) %>% 
+  summarise(mean_iqr = mean(Pitch_IQR)) %>% 
+  summarise(sd(mean_iqr))
+
+
+
+```
+
 
 Step 5: Compare the models
 - Plot priors and posteriors of the diagnosis effect in both models
