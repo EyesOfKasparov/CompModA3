@@ -238,11 +238,22 @@ d %>%
   stat_slab()
 
 
-d %>% 
+meta_dat_stuff <- d %>% 
   modelr::data_grid(ID, Language, Diagnosis) %>% 
-  add_predicted_draws(meta_ass_m1) %>%
-  ggplot(aes(x = .prediction, y = Diagnosis)) +
-  stat_slab()
+  add_predicted_draws(meta_ass_m1)
+
+ass_dat_stuff <- d %>% 
+  modelr::data_grid(ID, Language, Diagnosis) %>% 
+  add_predicted_draws(ass_m0) %>% 
+  mutate(model_name = "ass_prior")
+
+
+meta_dat_stuff %>% 
+  sample_n(size=10) %>%
+  mutate(model_name="meta_prior") %>%
+  bind_rows(sample_n(ass_dat_stuff, 10)) %>% 
+  ggplot(aes(x=.prediction, y=..density.., fill=model_name)) + 
+  geom_density(alpha=0.3)
 ```
 
 
