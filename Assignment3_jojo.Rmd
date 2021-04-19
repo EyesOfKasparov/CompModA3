@@ -44,6 +44,7 @@ md <- read_tsv("Ass3_MetaAnalysisData.tsv")
 md <- md %>%
   select(
     Paper,
+    Population,
     ASD_N,
     TD_N,
     PitchVariabilityASD_Mean,
@@ -71,7 +72,7 @@ md <- md %>%
 ```{r}
 meta_f <- bf(EffectSize | se(StandardError) ~ 1 + (1 | Population))
 
-get_prior(meta_f, md, family=gaussian())
+get_prior(meta_f, data=md, family=gaussian())
 
 meta_prior <- c(
   prior(normal(0, 1), class=Intercept),
@@ -96,7 +97,7 @@ summary(meta_m0)
 # Hapsing the effects
 meta_mean <- fixef(meta_m0)[[1]]
 meta_se <- fixef(meta_m0)[[2]]
-meta_hetero <- 0.35
+meta_hetero <- 0.32
 
 ```
 
@@ -122,21 +123,22 @@ Step 3: Build a regression model predicting Pitch variability from Diagnosis.
 - Evaluate model quality. Describe and plot the estimates. 
 
 ```{r}
-ass_f <- bf(Pitch_IQR ~ 0 + Diagnosis + (0 + Diagnosis | ID) + (1 | Language|ID))
+ass_f <- bf(Pitch_IQR ~ 0 + Diagnosis + Language + (0 + Diagnosis | ID))
 
-get_prior(ass_f, family=gaussian, data=d)
+get_prior(ass_f, family=student, data=d)
 
 ass_priors <- c(
-  prior(normal(0, 0.5), class=b),
+  prior(gamma(2, 0.1), class=nu),
+  prior(normal(0, 0.3), class=b),
   prior(lkj(1), class=cor), 
-  prior(normal(0.5, 0.25), class=sd),
-  prior(normal(0.5, 0.25), class=sigma)
+  prior(normal(0.3, 0.15), class=sd),
+  prior(normal(0.3, 0.15), class=sigma)
 )
 
 ass_m0_prior <- brm(
   ass_f,
   d,
-  family=gaussian,
+  family=student,
   prior=ass_priors,
   sample_prior = "only",
   cores = 2,
@@ -165,8 +167,38 @@ d %>%
   summarise(mean_iqr = mean(Pitch_IQR)) %>% 
   summarise(sd(mean_iqr))
 
+# SE != SD???? 
+meta_ass_priors <- c(
+  prior(gamma(2, 0.1), class=nu),
+  prior(normal(-0.44, 0.1), class=b),
+  prior(lkj(1), class=cor), 
+  prior(normal(0.10, 0.05), class=sd),
+  prior(normal(0.32, 0.16), class=sigma)
+)
 
 
+meta_ass_m0 <- brm(
+  ass_f,
+  d,
+  family=student,
+  prior=meta_ass_priors,
+  sample_prior = "only",
+  cores = 2,
+  chains = 2,
+  backend = "cmdstanr")
+
+pp_check(meta_ass_m0, nsamples=100)
+
+meta_ass_m1 <- brm(
+  ass_f,
+  d,
+  family=student,
+  prior=meta_ass_priors,
+  sample_prior = T,
+  cores = 2,
+  chains = 2,
+  backend = "cmdstanr")
+pp_check(meta_ass_m1, nsamples=100)
 ```
 
 
@@ -175,6 +207,52 @@ Step 5: Compare the models
 - Compare posteriors between the two models
 - Compare the two models (LOO)
 - Discuss how they compare and whether any of them is best.
+```{r}
+pos_samples <- posterior_samples(meta_ass_m1, pars = c("DiagnosisASD", "DiagnosisTD", "prior"))
+
+pos_samples %>% 
+  select(Diagnosis_ASD=b_DiagnosisASD, Diagnosis_TD=b_DiagnosisTD, prior_b) %>% 
+  pivot_longer(cols = everything()) %>% 
+  ggplot(aes(x=value, color=name, y=..density..)) +
+  geom_density()
+
+pos_samples_og <- posterior_samples(ass_m0, pars = c("DiagnosisASD", "DiagnosisTD", "prior"))
+
+pos_samples_og %>% 
+  select(Diagnosis_ASD=b_DiagnosisASD, Diagnosis_TD=b_DiagnosisTD, prior_b) %>% 
+  pivot_longer(cols = everything()) %>% 
+  ggplot(aes(x=value, color=name, y=..density..)) +
+  geom_density()
+
+```
+### Comparing posteriors
+```{r}
+pacman::p_load(tidybayes)
+
+get_variables(ass_m0)
+
+d %>% 
+  modelr::data_grid(ID, Language, Diagnosis) %>% 
+  add_predicted_draws(ass_m0) %>%
+  ggplot(aes(x = .prediction, y = Diagnosis)) +
+  stat_slab()
+
+
+d %>% 
+  modelr::data_grid(ID, Language, Diagnosis) %>% 
+  add_predicted_draws(meta_ass_m1) %>%
+  ggplot(aes(x = .prediction, y = Diagnosis)) +
+  stat_slab()
+```
+
+
+### Comparing LOO
+```{r}
+loo_meta <- loo(meta_ass_m1)
+loo_og <- loo(ass_m0)
+
+loo_compare(loo_og, loo_meta)
+```
 
 Step 6: Prepare a nice write up of the analysis and answer the questions at the top.
 
